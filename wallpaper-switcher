@@ -80,7 +80,7 @@ def are_similar(image_choices):
 def get_labels(image):
     if ARGS.debug:
         print('Getting labels for ' + image)
-    output = str(subprocess.check_output(['python3 ~/bin/classify_image.py --image_file ' + ARGS.path + image],
+    output = str(subprocess.check_output(['python3 `which classify_image.py` --image_file ' + ARGS.path + image],
                                          shell=True))
     output = re.sub(r'\(score = [0-9]\.[0-9]*\)(\\n)', ', ', output)
     labels = output.split(',')
