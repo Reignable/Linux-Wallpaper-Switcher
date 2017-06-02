@@ -1,0 +1,287 @@
+#! /usr/bin/env python3
+
+import argparse
+import pickle
+import numpy
+import os
+import sys
+import random
+import re
+import subprocess
+import threading
+from PIL import Image
+
+IMAGE_LIST = []
+NUM_MONITORS = 0
+CATEGORIES = []
+ARGS = None
+LABELS = {}
+
+
+def set_wallpaper(image_choices):
+    command = 'feh'
+    for i in range(len(image_choices)):
+        command += ' --bg-fill {choice}'.format(choice=ARGS.path + image_choices[i])
+    subprocess.call([command], shell=True)
+
+
+def get_image_list():
+    pattern = '.*\.(png|jpg)'
+    return [f for f in os.listdir(ARGS.path) if re.match(pattern, f)]
+
+
+def get_num_monitors():
+    output = subprocess.check_output(['xdpyinfo | grep dimensions'], shell=True)
+    _, resolution, _, _, _ = output.split()
+    width, height = resolution.split(b'x')
+    num_monitors = int(width) / ARGS.resolution
+    return num_monitors
+
+
+def get_main_color(image):
+    image = Image.open(ARGS.path + image)
+    avg_color_per_row = numpy.average(image, axis=0)
+    avg_color = numpy.average(avg_color_per_row, axis=0)
+    try:
+        if max(avg_color) == avg_color[0]:
+            return 'r'
+        elif max(avg_color) == avg_color[1]:
+            return 'g'
+        else:
+            return 'b'
+    except TypeError:
+        return 'b'
+
+
+def check_color_similarity(image_choices):
+    for i, image in enumerate(image_choices):
+        if i >= 1:
+            if get_main_color(image_choices[i - 1]) != get_main_color(image_choices[i]):
+                return False
+    return True
+
+
+def are_similar(image_choices):
+    averages = []
+    for image in image_choices:
+        array = numpy.asarray(Image.open(ARGS.path + image))
+        average = numpy.mean(array)
+        averages.append(average)
+    diff = 0
+    for i, average in enumerate(averages):
+        if i >= 1:
+            diff += 100 * (averages[i - 1] - averages[i]) / averages[i]
+    if -20 < diff < 20:
+        return True
+    else:
+        return False
+
+
+def get_labels(image):
+    if ARGS.debug:
+        print('Getting labels for ' + image)
+    output = str(subprocess.check_output(['python3 ~/bin/classify_image.py --image_file ' + ARGS.path + image],
+                                         shell=True))
+    output = re.sub(r'\(score = [0-9]\.[0-9]*\)(\\n)', ', ', output)
+    labels = output.split(',')
+    labels = [l.strip() for l in labels][:-1]
+    labels[0] = labels[0][2:]
+    # labels = re.findall(r"[\w']+", output)[1:-1]
+    return labels
+
+
+def limit_image_list(image_list):
+    category = ARGS.category if ARGS.category else random.choice(CATEGORIES)
+    return [image for image in image_list if category == image.split('_')[0]]
+
+
+def select_images_smart(image_list):
+    image_choices = [None] * NUM_MONITORS
+    if ARGS.group or ARGS.category:
+        image_list = limit_image_list(image_list)
+    labels = [[]] * NUM_MONITORS
+    image_choices[0] = random.choice(image_list)
+    labels[0] = LABELS[image_choices[0]]
+    i = 1
+    if ARGS.debug:
+        print('Starting while i <= NUM_MONITORS')
+    while i <= NUM_MONITORS - 1:
+        if ARGS.debug:
+            print('Choosing image', i)
+        image_choices[i] = random.choice(image_list)
+        labels[i] = LABELS[image_choices[i]]
+        if len(set(labels[i - 1]).intersection(labels[i])) >= 2:
+            i += 1
+    print(labels)
+    return image_choices
+
+
+def select_images_dumb(image_list):
+    image_choices = [None] * NUM_MONITORS
+    if ARGS.group or ARGS.category:
+        image_list = limit_image_list(image_list)
+    for i in range(NUM_MONITORS):
+        image_choices[i] = random.choice(image_list)
+    return image_choices
+
+
+def program_is_available(program):
+    try:
+        subprocess.check_output(['which ' + program], shell=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def check_duplicates(image_choices):
+    return len(image_choices) != len(set(image_choices))
+
+
+def make_category_list():
+    if ARGS.debug:
+        print('Making category list')
+    pattern = '.*_[0-9]{3}.(png|jpg)'
+    categories = []
+    for image in IMAGE_LIST:
+        if re.match(pattern, image):
+            category, *rest = image.split('_')
+            if category not in categories:
+                categories.append(category)
+    if ARGS.debug:
+        print('Categories are...')
+        print(categories)
+    return categories
+
+
+def run_switcher():
+    if ARGS.debug:
+        print('Running')
+    image_choices = [None] * NUM_MONITORS
+    images_found = False
+    while not images_found:
+        if ARGS.smart:
+            image_choices = select_images_smart(IMAGE_LIST)
+            images_found = True
+        else:
+            image_choices = select_images_dumb(IMAGE_LIST)
+            images_found = True
+        if ARGS.color and not check_color_similarity(image_choices):
+            if ARGS.debug:
+                print('Not similar colors')
+            images_found = False
+        if ARGS.similar and not are_similar(image_choices):
+            if ARGS.debug:
+                print('Not similar images')
+            images_found = False
+        if check_duplicates(image_choices):
+            if ARGS.debug:
+                print('Found duplicates')
+            images_found = False
+    # globals()['set_wallpaper_'+str(NUM_MONITORS)](image_choices)
+    if ARGS.debug:
+        print('Setting wallpaper using images:', image_choices)
+    set_wallpaper(image_choices)
+    if ARGS.no_duration:
+        sys.exit(0)
+    if ARGS.debug:
+        print('Waiting for', ARGS.duration, 'seconds')
+    threading.Timer(ARGS.duration, run_switcher).start()
+
+
+def update_labels(image_list):
+    if ARGS.debug:
+        print('Updating labels')
+    for image in LABELS.keys():
+        if image not in image_list:
+            LABELS.pop(image)
+    for image in image_list:
+        if image not in LABELS.keys():
+            LABELS[image] = get_labels(image)
+    if ARGS.debug:
+        print('Saving labels file')
+    pickle.dump(LABELS, open(ARGS.path+'labels.p', 'wb'))
+
+
+def check_image_path():
+    if ARGS.debug:
+        print('Checking image path')
+    if ARGS.path[:-1] is not '/':
+        ARGS.path += '/'
+        if not os.path.exists(ARGS.path):
+            print('Could not find path ' + ARGS.path + '. Please check and try again')
+            sys.exit(1)
+
+
+def main():
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    if not program_is_available('feh'):
+        print('feh is required to set the wallpaper, please install it and try again')
+        sys.exit(0)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--duration',
+                        type=int,
+                        action='store',
+                        default=120,
+                        help='The duration to show the wallpaper set for in seconds (default 120 seconds)')
+    parser.add_argument('--group',
+                        default=False,
+                        action='store_true',
+                        help='Chooses images based on categorised file names')
+    parser.add_argument('--similar',
+                        default=False,
+                        action='store_true',
+                        help='')
+    parser.add_argument('--path',
+                        type=str,
+                        action='store',
+                        default=os.path.expanduser('~/Pictures/'),
+                        help='')
+    parser.add_argument('--category',
+                        type=str,
+                        action='store',
+                        help='')
+    parser.add_argument('--resolution',
+                        type=int,
+                        action='store',
+                        default=1920,
+                        help='')
+    parser.add_argument('--smart',
+                        action='store_true',
+                        help='')
+    parser.add_argument('--color',
+                        action='store_true',
+                        help='')
+    parser.add_argument('--debug',
+                        action='store_true',
+                        help='')
+    parser.add_argument('--no_duration',
+                        action='store_true',
+                        help='')
+    global ARGS, NUM_MONITORS, IMAGE_LIST, LABELS, CATEGORIES
+    ARGS = parser.parse_args()
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    check_image_path()
+    NUM_MONITORS = int(get_num_monitors())
+    IMAGE_LIST = get_image_list()
+    if ARGS.category or ARGS.group:
+        CATEGORIES = make_category_list()
+    if NUM_MONITORS == 1:
+        ARGS.group = False
+        ARGS.similar = False
+    if ARGS.category and ARGS.category not in CATEGORIES:
+        sys.exit(0)
+    if ARGS.smart:
+        if ARGS.debug:
+            print('Checking for labels file')
+        if os.path.isfile(ARGS.path+'labels.p'):
+            if ARGS.debug:
+                print('Loading labels')
+            LABELS = pickle.load(open(ARGS.path+'labels.p', 'rb'))
+        update_labels(IMAGE_LIST)
+    run_switcher()
+
+
+if __name__ == "__main__":
+    main()
