@@ -189,14 +189,19 @@ def run_switcher():
 
 
 def update_labels(image_list):
+    remove_list = []
     if ARGS.debug:
         print('Updating labels')
     for image in LABELS.keys():
         if image not in image_list:
-            LABELS.pop(image)
+            remove_list.append(image)
     for image in image_list:
         if image not in LABELS.keys():
             LABELS[image] = get_labels(image)
+    if ARGS.debug:
+        print('Removing old images')
+    for image in remove_list:
+        LABELS.pop(image)
     if ARGS.debug:
         print('Saving labels file')
     pickle.dump(LABELS, open(ARGS.path+'labels.p', 'wb'))
