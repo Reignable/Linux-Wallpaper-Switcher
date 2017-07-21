@@ -1,14 +1,15 @@
 #! /usr/bin/env python3
 
 import argparse
-import pickle
-import numpy
 import os
-import sys
+import pickle
 import random
 import re
 import subprocess
+import sys
 import threading
+
+import numpy
 from PIL import Image
 
 IMAGE_LIST = []
@@ -16,6 +17,11 @@ NUM_MONITORS = 0
 CATEGORIES = []
 ARGS = None
 LABELS = {}
+
+
+def printd(message, *args):
+    if ARGS.debug:
+        print(message, *args)
 
 
 def set_wallpaper(image_choices):
@@ -78,8 +84,7 @@ def are_similar(image_choices):
 
 
 def get_labels(image):
-    if ARGS.debug:
-        print('Getting labels for ' + image)
+    printd('Getting labels for ' + image)
     output = str(subprocess.check_output(['python3 `which classify_image.py` --image_file ' + ARGS.path + image],
                                          shell=True))
     output = re.sub(r'\(score = [0-9]\.[0-9]*\)(\\n)', ', ', output)
@@ -103,11 +108,9 @@ def select_images_smart(image_list):
     image_choices[0] = random.choice(image_list)
     labels[0] = LABELS[image_choices[0]]
     i = 1
-    if ARGS.debug:
-        print('Starting while i <= NUM_MONITORS')
+    printd('Starting while i <= NUM_MONITORS')
     while i <= NUM_MONITORS - 1:
-        if ARGS.debug:
-            print('Choosing image', i)
+        printd('Choosing image', i)
         image_choices[i] = random.choice(image_list)
         labels[i] = LABELS[image_choices[i]]
         if len(set(labels[i - 1]).intersection(labels[i])) >= 2:
@@ -138,8 +141,7 @@ def check_duplicates(image_choices):
 
 
 def make_category_list():
-    if ARGS.debug:
-        print('Making category list')
+    printd('Making category list')
     pattern = '.*_[0-9]{3}.(png|jpg)'
     categories = []
     for image in IMAGE_LIST:
@@ -147,15 +149,13 @@ def make_category_list():
             category, *rest = image.split('_')
             if category not in categories:
                 categories.append(category)
-    if ARGS.debug:
-        print('Categories are...')
-        print(categories)
+    printd('Categories are...')
+    printd(categories)
     return categories
 
 
 def run_switcher():
-    if ARGS.debug:
-        print('Running')
+    printd('Running')
     image_choices = [None] * NUM_MONITORS
     images_found = False
     while not images_found:
@@ -166,50 +166,46 @@ def run_switcher():
             image_choices = select_images_dumb(IMAGE_LIST)
             images_found = True
         if ARGS.color and not check_color_similarity(image_choices):
-            if ARGS.debug:
-                print('Not similar colors')
+            printd('Not similar colors')
             images_found = False
         if ARGS.similar and not are_similar(image_choices):
-            if ARGS.debug:
-                print('Not similar images')
+            printd('Not similar images')
             images_found = False
         if check_duplicates(image_choices):
-            if ARGS.debug:
-                print('Found duplicates')
+            printd('Found duplicates')
             images_found = False
     # globals()['set_wallpaper_'+str(NUM_MONITORS)](image_choices)
-    if ARGS.debug:
-        print('Setting wallpaper using images:', image_choices)
+    printd('Setting wallpaper using images:', image_choices)
     set_wallpaper(image_choices)
     if ARGS.no_duration:
         sys.exit(0)
-    if ARGS.debug:
-        print('Waiting for', ARGS.duration, 'seconds')
+    printd('Waiting for', ARGS.duration, 'seconds')
     threading.Timer(ARGS.duration, run_switcher).start()
 
 
 def update_labels(image_list):
+    printd('Updating labels')
     remove_list = []
-    if ARGS.debug:
-        print('Updating labels')
     for image in LABELS.keys():
         if image not in image_list:
             remove_list.append(image)
     for image in image_list:
         if image not in LABELS.keys():
             LABELS[image] = get_labels(image)
-    if ARGS.debug:
-        print('Removing old images')
+    printd('Saving labels file')
     for image in remove_list:
         LABELS.pop(image)
-    if ARGS.debug:
-        print('Saving labels file')
+    printd('Saving labels file')
     pickle.dump(LABELS, open(ARGS.path+'labels.p', 'wb'))
 
 
+def update_labels_par(image_list):
+    print()
+    # Work out unused labels
+
+
 def check_image_path():
-    if ARGS.debug:
-        print('Checking image path')
+    printd('Checking image path')
     if ARGS.path[:-1] is not '/':
         ARGS.path += '/'
         if not os.path.exists(ARGS.path):
@@ -278,15 +274,12 @@ def main():
     if ARGS.category and ARGS.category not in CATEGORIES:
         sys.exit(0)
     if ARGS.smart:
-        if ARGS.debug:
-            print('Checking for labels file')
+        printd('Checking for labels file')
         if os.path.isfile(ARGS.path+'labels.p'):
-            if ARGS.debug:
-                print('Loading labels')
+            printd('Loading labels')
             LABELS = pickle.load(open(ARGS.path+'labels.p', 'rb'))
         update_labels(IMAGE_LIST)
     run_switcher()
-
 
 if __name__ == "__main__":
     main()
