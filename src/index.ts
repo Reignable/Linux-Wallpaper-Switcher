@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-import wallpaper from 'wallpaper'
 import program from 'commander'
-import { resolveHome } from './resolveHome'
+import wallpaper from 'wallpaper'
+import { chooseMultipleWallpapers } from './chooseMultipleWallpapers'
+import { chooseSingleWallpaper } from './chooseSingleWallpaper'
 import { getFilesFromDirectory } from './getFilesFromDirectory'
 import { getNumberOfScreens } from './getNumberOfScreens'
+import { resolveHome } from './resolveHome'
+// require('@tensorflow/tfjs-node')
 
 const parsePath = (path: string) => {
   const homeResolved = resolveHome(path)
@@ -29,17 +32,16 @@ program
   )
   .parse(process.argv)
 
-const runSwitcher = async () => {
-  const wallpaperList = getFilesFromDirectory(program.path)
-  const numberOfWallpapers = wallpaperList.length
-  const numberOfScreens = await getNumberOfScreens()
-  console.log(numberOfScreens)
+const wallpaperList = getFilesFromDirectory(program.path)
 
-  const chooseWallpaper = () =>
-    `${program.path}${
-      wallpaperList[Math.floor(Math.random() * Math.floor(numberOfWallpapers))]
-    }`
-  wallpaper.set(chooseWallpaper())
+const runSwitcher = async () => {
+  const numberOfScreens = await getNumberOfScreens()
+  // if (numberOfScreens > 1) {
+  chooseMultipleWallpapers(numberOfScreens, program.path, wallpaperList)
+  // } else {
+  wallpaper.set(chooseSingleWallpaper(program.path, wallpaperList))
+  // }
 }
 
-setInterval(runSwitcher, program.interval)
+runSwitcher()
+// setInterval(runSwitcher, program.interval)
